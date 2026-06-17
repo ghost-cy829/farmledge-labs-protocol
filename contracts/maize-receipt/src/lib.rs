@@ -1,28 +1,78 @@
 #![no_std]
-use soroban_sdk::contracterror;
 
-#[contracterror]
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum ContractError {
-    AlreadyInitialized = 1,
-    Unauthorized = 2,
-    TokenNotFound = 3,
-    TokenLocked = 4,
-    InvalidCommodity = 5,
-    InvalidWeight = 6,
+mod errors;
+mod storage;
+
+pub use errors::ContractError;
+use storage::DataKey;
+
+use soroban_sdk::{contract, contractimpl, Address, Env};
+
+#[contract]
+pub struct MaizeReceiptContract;
+
+#[contractimpl]
+impl MaizeReceiptContract {
+    pub fn init(env: Env, admin: Address) -> Result<(), ContractError> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(ContractError::AlreadyInitialized);
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::TokenCounter, &0u64);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::{testutils::Address as _, Address, Env};
 
     #[test]
-    fn test_contract_error_discriminants() {
-        assert_eq!(ContractError::AlreadyInitialized as u32, 1);
-        assert_eq!(ContractError::Unauthorized as u32, 2);
-        assert_eq!(ContractError::TokenNotFound as u32, 3);
-        assert_eq!(ContractError::TokenLocked as u32, 4);
-        assert_eq!(ContractError::InvalidCommodity as u32, 5);
-        assert_eq!(ContractError::InvalidWeight as u32, 6);
+    fn test_init_sets_admin() {
+        let env = Env::default();
+        let contract_id = env.register(MaizeReceiptContract, ());
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.init(&admin);
+
+        let stored: Address = env
+            .as_contract(&contract_id, || {
+                env.storage().instance().get(&DataKey::Admin).unwrap()
+            });
+        assert_eq!(stored, admin);
+    }
+
+    #[test]
+    fn test_init_sets_counter_to_zero() {
+        let env = Env::default();
+        let contract_id = env.register(MaizeReceiptContract, ());
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.init(&admin);
+
+        let counter: u64 = env
+            .as_contract(&contract_id, || {
+                env.storage().instance().get(&DataKey::TokenCounter).unwrap()
+            });
+        assert_eq!(counter, 0u64);
+    }
+
+    #[test]
+    fn test_init_rejects_double_call() {
+        let env = Env::default();
+        let contract_id = env.register(MaizeReceiptContract, ());
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.init(&admin);
+
+        let result = client.try_init(&admin);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::AlreadyInitialized))
+        );
     }
 }
